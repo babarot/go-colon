@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/b4b4r07/go-colon"
 	"github.com/k0kubun/pp"
 )
@@ -14,9 +12,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	pp.Println(res)
-	fmt.Printf("%#v\n", res.First())
-	fmt.Printf("%#v\n", res.Executable())
-	// fmt.Printf("%#v\n", res.Executable().First())
-	// fmt.Printf("%#v\n", res.Executable().Array())
+	pp.Println(res.Executable())
+	pp.Println(res.Executable().Args(1))
 }

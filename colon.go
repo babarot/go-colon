@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+
+	"github.com/mattn/go-shellwords"
 )
 
 var (
@@ -16,23 +18,19 @@ type Parser struct {
 	UseOption bool
 }
 
+type Objects []Object
+
 type Result struct {
-	String string
-	Parsed []string
+	String  string
+	Objects Objects
 }
 
-/*
-type Result struct {
-	String string
-	Parsed Parsed
-}
-
-type Parsed struct {
+type Object struct {
 	Command string
-	Option []string
-	Error error
+	Options []string
+	Error   error
+	Path    string
 }
-*/
 
 func NewParser() *Parser {
 	return &Parser{
@@ -46,23 +44,22 @@ func (p *Parser) Parse(str string) (*Result, error) {
 		return &Result{}, errors.New("invalid strings")
 	}
 
-	var (
-		items  []string = strings.Split(str, p.Separator)
-		parsed []string
-	)
+	var objs Objects
 
-	parsed = items
-	if !p.UseOption {
-		// initialize if this cond is false (default)
-		parsed = []string{}
-		for _, item := range items {
-			parsed = append(parsed, strings.Split(item, " ")[0])
-		}
+	items := strings.Split(str, p.Separator)
+	for _, item := range items {
+		args, err := shellwords.Parse(item)
+		objs = append(objs, Object{
+			Command: args[0],
+			Options: args[1:],
+			Error:   err,
+			Path:    "",
+		})
 	}
 
 	return &Result{
-		String: str,
-		Parsed: parsed,
+		String:  str,
+		Objects: objs,
 	}, nil
 }
 
@@ -70,45 +67,39 @@ func Parse(str string) (*Result, error) {
 	return NewParser().Parse(str)
 }
 
-func (r *Result) First() string {
-	if len(r.Parsed) > 0 {
-		return r.Parsed[0]
+func (r *Result) First() Object {
+	if len(r.Objects) > 0 {
+		return r.Objects[0]
 	}
-	return ""
+	return Object{}
 }
 
-func (r *Result) Executable() Array {
-	commands := []string{}
-	for _, item := range r.Parsed {
-		if item == "" {
-			continue
-		}
-		// TODO
-		// case: UseOption is true
-		_, err := exec.LookPath(item)
+func (r *Result) Executable() Objects {
+	var objs Objects
+	for _, obj := range r.Objects {
+		path, err := exec.LookPath(obj.Command)
 		if err != nil {
-			// not found in PATH
-			continue
+			// TODO: add option
+			// continue
 		}
-		commands = append(commands, item)
+		obj.Path = path
+		obj.Error = err
+		objs = append(objs, obj)
 	}
-	// TODO (shoud be returned as []string?)
-	return Array(commands)
+	return objs
 }
 
-type Array []string
-
-func (a Array) Get(n int) string {
-	if len(a) > n {
-		return a[n]
+// TODO: imple
+// ArgsN
+// Arg
+// ArgN
+func (objs Objects) Args(n int) []string {
+	var ret []string
+	for i, obj := range objs {
+		if i == n {
+			ret = []string{obj.Command}
+			ret = append(ret, obj.Options...)
+		}
 	}
-	return ""
-}
-
-func (a Array) First() string {
-	return a.Get(0)
-}
-
-func (a Array) Array() []string {
-	return []string(a)
+	return ret
 }
