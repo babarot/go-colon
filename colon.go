@@ -179,6 +179,7 @@ func isExist(name string) bool {
 	return err == nil
 }
 
+// One returns the first Objects. If not, returns empty
 func (o Objects) One() Object {
 	if len(o) > 0 {
 		return o[0]
