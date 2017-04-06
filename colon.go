@@ -56,26 +56,30 @@ func (p *Parser) Parse(str string) (*Result, error) {
 		var (
 			errStack []error
 			command  string
+			first    string
 		)
 		args, err := shellwords.Parse(item)
+		if len(args) > 0 {
+			first = args[0]
+		}
 		if err != nil {
 			errStack = append(errStack, err)
 		}
-		isDir := isDir(args[0])
+		isDir := isDir(first)
 		if !isDir {
 			// Discard err in order not to make an error
 			// even if it is not found in your PATH
-			command, _ = exec.LookPath(args[0])
+			command, _ = exec.LookPath(first)
 		}
 		// Error if it can not be found in your all PATHs
 		// or in the current directory
-		if command == "" && !isExist(args[0]) {
-			err = fmt.Errorf("%s: no such file or directory", args[0])
+		if command == "" && !isExist(first) {
+			err = fmt.Errorf("%s: no such file or directory", first)
 			errStack = append(errStack, err)
 		}
 		objs = append(objs, Object{
 			Args:    args,
-			First:   args[0],
+			First:   first,
 			Errors:  errStack,
 			Command: command,
 			IsDir:   isDir,
