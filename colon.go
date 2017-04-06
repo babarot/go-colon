@@ -2,6 +2,8 @@ package colon
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -18,19 +20,20 @@ type Parser struct {
 	UseOption bool
 }
 
-type Objects []Object
-
 type Result struct {
 	String  string
 	Objects Objects
 }
 
 type Object struct {
+	Args    []string
+	First   string
+	Errors  []error
 	Command string
-	Options []string
-	Error   error
-	Path    string
+	IsDir   bool
 }
+
+type Objects []Object
 
 func NewParser() *Parser {
 	return &Parser{
@@ -43,17 +46,39 @@ func (p *Parser) Parse(str string) (*Result, error) {
 	if str == "" {
 		return &Result{}, errors.New("invalid strings")
 	}
-
 	var objs Objects
 
 	items := strings.Split(str, p.Separator)
 	for _, item := range items {
+		if item == "" {
+			continue
+		}
+		var (
+			errStack []error
+			command  string
+		)
 		args, err := shellwords.Parse(item)
+		if err != nil {
+			errStack = append(errStack, err)
+		}
+		isDir := isDir(args[0])
+		if !isDir {
+			// Discard err in order not to make an error
+			// even if it is not found in your PATH
+			command, _ = exec.LookPath(args[0])
+		}
+		// Error if it can not be found in your all PATHs
+		// or in the current directory
+		if command == "" && !isExist(args[0]) {
+			err = fmt.Errorf("%s: no such file or directory", args[0])
+			errStack = append(errStack, err)
+		}
 		objs = append(objs, Object{
-			Command: args[0],
-			Options: args[1:],
-			Error:   err,
-			Path:    "",
+			Args:    args,
+			First:   args[0],
+			Errors:  errStack,
+			Command: command,
+			IsDir:   isDir,
 		})
 	}
 
@@ -67,39 +92,43 @@ func Parse(str string) (*Result, error) {
 	return NewParser().Parse(str)
 }
 
-func (r *Result) First() Object {
-	if len(r.Objects) > 0 {
-		return r.Objects[0]
-	}
-	return Object{}
-}
-
-func (r *Result) Executable() Objects {
-	var objs Objects
+func (r *Result) Filter(fn func(Object) bool) Objects {
+	ret := make(Objects, 0)
 	for _, obj := range r.Objects {
-		path, err := exec.LookPath(obj.Command)
-		if err != nil {
-			// TODO: add option
-			// continue
-		}
-		obj.Path = path
-		obj.Error = err
-		objs = append(objs, obj)
-	}
-	return objs
-}
-
-// TODO: imple
-// ArgsN
-// Arg
-// ArgN
-func (objs Objects) Args(n int) []string {
-	var ret []string
-	for i, obj := range objs {
-		if i == n {
-			ret = []string{obj.Command}
-			ret = append(ret, obj.Options...)
+		if fn(obj) {
+			ret = append(ret, obj)
 		}
 	}
 	return ret
+}
+
+func (r *Result) Get(str string) Objects {
+	return r.Filter(func(o Object) bool {
+		return strings.Contains(strings.Join(o.Args, " "), str)
+	})
+}
+
+func (r *Result) WithoutErrors() Objects {
+	return r.Filter(func(o Object) bool {
+		return len(o.Errors) == 0
+	})
+}
+
+func (r *Result) Executable() Objects {
+	return r.Filter(func(o Object) bool {
+		return o.Command != ""
+	})
+}
+
+func isDir(name string) bool {
+	fi, err := os.Stat(name)
+	if err != nil {
+		return false
+	}
+	return fi.IsDir()
+}
+
+func isExist(name string) bool {
+	_, err := os.Stat(name)
+	return err == nil
 }
