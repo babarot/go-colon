@@ -178,3 +178,10 @@ func isExist(name string) bool {
 	_, err := os.Stat(name)
 	return err == nil
 }
+
+func (o Objects) One() Object {
+	if len(o) > 0 {
+		return o[0]
+	}
+	return Object{}
+}
