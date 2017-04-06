@@ -15,4 +15,5 @@ func main() {
 	// pp.Println(res)
 	// pp.Println(res.WithoutErrors())
 	pp.Println(res.Executable())
+	pp.Println(res.Directories())
 }
