@@ -24,8 +24,8 @@ type Parser struct {
 }
 
 type Result struct {
-	// String is the original string
-	String string
+	// Origin is the original string
+	Origin string
 
 	// Object shows parsing result
 	Objects Objects
@@ -112,7 +112,7 @@ func (p *Parser) Parse(str string) (*Result, error) {
 	}
 
 	return &Result{
-		String:  str,
+		Origin:  str,
 		Objects: objs,
 	}, nil
 }
@@ -120,6 +120,11 @@ func (p *Parser) Parse(str string) (*Result, error) {
 // Parse is public method exported for accessing from other package
 func Parse(str string) (*Result, error) {
 	return NewParser().Parse(str)
+}
+
+// String returns the original string before being parsed
+func (r *Result) String() string {
+	return r.Origin
 }
 
 // Filter filters the parse result by condition
