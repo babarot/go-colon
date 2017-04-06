@@ -31,12 +31,14 @@ type Result struct {
 	Objects Objects
 }
 
-/*
-Object shows parsing result
-e.g. "/bin:/usr/bin:..."
-      ____ <= Object
-*/
+// Object shows parsing result
+// e.g. "/bin:/usr/bin:..."
+// ......^^^^ Object
 type Object struct {
+	// Index returns the number of the given character string
+	// separated by Separator
+	Index int
+
 	// Args is the result parsed according to the shell's splitting rules
 	Args []string
 
@@ -71,7 +73,7 @@ func (p *Parser) Parse(str string) (*Result, error) {
 	var objs Objects
 
 	items := strings.Split(str, p.Separator)
-	for _, item := range items {
+	for index, item := range items {
 		if item == "" {
 			continue
 		}
@@ -100,6 +102,7 @@ func (p *Parser) Parse(str string) (*Result, error) {
 			errStack = append(errStack, err)
 		}
 		objs = append(objs, Object{
+			Index:   index + 1,
 			Args:    args,
 			First:   first,
 			Errors:  errStack,
