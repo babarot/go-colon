@@ -14,7 +14,7 @@ import (
 var (
 	// Separator is an identifier for delimiting the target string
 	// Defaults to os.PathListSeparator but you can change anything you want
-	Separator string = os.PathListSeparator
+	Separator string = string(os.PathListSeparator)
 
 	ErrInvalid = errors.New("invalid argument")
 )
