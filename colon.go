@@ -23,14 +23,6 @@ type Parser struct {
 	Separator string
 }
 
-type Result struct {
-	// Origin is the original string
-	Origin string
-
-	// Object shows parsing result
-	Objects Objects
-}
-
 // Object shows parsing result
 // e.g. "/bin:/usr/bin:..."
 // ......^^^^ Object
@@ -56,7 +48,7 @@ type Object struct {
 	IsDir bool
 }
 
-type Objects []Object
+type Result []Object
 
 // NewParser creates Parser
 func NewParser() *Parser {
@@ -70,7 +62,7 @@ func (p *Parser) Parse(str string) (*Result, error) {
 	if str == "" {
 		return &Result{}, ErrInvalid
 	}
-	var objs Objects
+	var objs Result
 
 	items := strings.Split(str, p.Separator)
 	for index, item := range items {
@@ -111,59 +103,12 @@ func (p *Parser) Parse(str string) (*Result, error) {
 		})
 	}
 
-	return &Result{
-		Origin:  str,
-		Objects: objs,
-	}, nil
+	return &objs, nil
 }
 
 // Parse is public method exported for accessing from other package
 func Parse(str string) (*Result, error) {
 	return NewParser().Parse(str)
-}
-
-// String returns the original string before being parsed
-func (r *Result) String() string {
-	return r.Origin
-}
-
-// Filter filters the parse result by condition
-func (r *Result) Filter(fn func(Object) bool) Objects {
-	ret := make(Objects, 0)
-	for _, obj := range r.Objects {
-		if fn(obj) {
-			ret = append(ret, obj)
-		}
-	}
-	return ret
-}
-
-// Get returns one object containing the given string
-func (r *Result) Get(str string) Objects {
-	return r.Filter(func(o Object) bool {
-		return strings.Contains(strings.Join(o.Args, " "), str)
-	})
-}
-
-// WithoutErrors returns objects with no errors
-func (r *Result) WithoutErrors() Objects {
-	return r.Filter(func(o Object) bool {
-		return len(o.Errors) == 0
-	})
-}
-
-// Executable returns objects whose first argument is in PATH
-func (r *Result) Executable() Objects {
-	return r.Filter(func(o Object) bool {
-		return o.Command != ""
-	})
-}
-
-// Directories returns the objects that the first argument is a directory
-func (r *Result) Directories() Objects {
-	return r.Filter(func(o Object) bool {
-		return o.IsDir
-	})
 }
 
 func isDir(name string) bool {
@@ -179,10 +124,49 @@ func isExist(name string) bool {
 	return err == nil
 }
 
-// One returns the first Objects. If not, returns empty
-func (o Objects) One() Object {
-	if len(o) > 0 {
-		return o[0]
+// Filter filters the parse result by condition
+func (r *Result) Filter(fn func(Object) bool) *Result {
+	ret := make(Result, 0)
+	for _, obj := range *r {
+		if fn(obj) {
+			ret = append(ret, obj)
+		}
 	}
-	return Object{}
+	return &ret
+}
+
+// Get returns one object containing the given string
+func (r *Result) Get(str string) *Result {
+	return r.Filter(func(o Object) bool {
+		return strings.Contains(strings.Join(o.Args, " "), str)
+	})
+}
+
+// WithoutErrors returns objects with no errors
+func (r *Result) WithoutErrors() *Result {
+	return r.Filter(func(o Object) bool {
+		return len(o.Errors) == 0
+	})
+}
+
+// Executable returns objects whose first argument is in PATH
+func (r *Result) Executable() *Result {
+	return r.Filter(func(o Object) bool {
+		return o.Command != ""
+	})
+}
+
+// Directories returns the objects that the first argument is a directory
+func (r *Result) Directories() *Result {
+	return r.Filter(func(o Object) bool {
+		return o.IsDir
+	})
+}
+
+// One returns the first Object. If not, returns empty
+func (r *Result) One() Object {
+	if len(*r) == 0 {
+		return Object{}
+	}
+	return (*r)[0]
 }
