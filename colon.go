@@ -24,33 +24,38 @@ type Parser struct {
 	Separator string
 }
 
-// Object shows parsing result
-// e.g. "/bin:/usr/bin:..."
-// ......^^^^ Object
+// Object is parsed result
 type Object struct {
 	// Index returns the number of the given character string
 	// separated by Separator
 	Index int
 
-	// Attr ...
+	// Attr has detailed information on the object
 	Attr Attribute
 
 	// Errors stacks all errors that occurred during parsing
 	Errors []error
+}
 
-	// Command returns the full path of the command
-	// if its first argument is found in PATH
-	Command string
+// Attribute represents file attribute information
+type Attribute struct {
+	// First means the first argument if there are multiple arguments
+	First string
+
+	// Other means the arguments other than the first argument
+	Other []string
+
+	// Args means the all arguments
+	Args []string
+
+	// Base and Dir mean Basename and Dirname of the file respectively
+	Base, Dir string
 
 	// IsDir returns true if the first argument is a directory
 	IsDir bool
-}
 
-type Attribute struct {
-	First     string
-	Other     []string
-	Args      []string
-	Base, Dir string
+	// Command returns the full-path if the first argument is in $PATH
+	Command string
 }
 
 type Result []Object
@@ -110,13 +115,13 @@ func (p *Parser) Parse(str string) (*Result, error) {
 				}
 				return dir
 			}(args[0]),
-		}
-		objs = append(objs, Object{
-			Index:   index + 1,
-			Attr:    attr,
-			Errors:  errStack,
 			Command: command,
 			IsDir:   isDir,
+		}
+		objs = append(objs, Object{
+			Index:  index + 1,
+			Attr:   attr,
+			Errors: errStack,
 		})
 	}
 
@@ -141,6 +146,18 @@ func isExist(name string) bool {
 	return err == nil
 }
 
+func uniqueSlice(args Result) Result {
+	rs := make(Result, 0, len(args))
+	encountered := map[int]bool{}
+	for _, arg := range args {
+		if !encountered[arg.Index] {
+			encountered[arg.Index] = true
+			rs = append(rs, arg)
+		}
+	}
+	return rs
+}
+
 // Filter filters the parse result by condition
 func (r *Result) Filter(fn func(Object) bool) *Result {
 	ret := make(Result, 0)
@@ -152,11 +169,37 @@ func (r *Result) Filter(fn func(Object) bool) *Result {
 	return &ret
 }
 
-// Get returns one object containing the given string
-func (r *Result) Get(str string) *Result {
-	return r.Filter(func(o Object) bool {
-		return strings.Contains(strings.Join(o.Attr.Args, " "), str)
-	})
+// Get searches parsed results with given arguments and returns matched objects
+//
+// PATH="/bin:/usr/bin:/usr/local/bin"
+// Get("usr") => "/usr/bin","/usr/local/bin"
+// Get(1) => "/bin"
+func (r *Result) Get(args ...interface{}) *Result {
+	var rs Result
+	for _, arg := range args {
+		switch arg.(type) {
+		case string:
+			rs = append(rs, *r.Filter(func(o Object) bool {
+				return strings.Contains(strings.Join(o.Attr.Args, " "), arg.(string))
+			})...)
+		case int:
+			rs = append(rs, *r.Filter(func(o Object) bool {
+				return o.Index == arg.(int)
+			})...)
+		}
+	}
+	// Remove it if there is the same
+	rs = uniqueSlice(rs)
+	return &rs
+}
+
+// Error extracts only errors from objects
+func (r *Result) Error() []error {
+	var errStack []error
+	for _, obj := range *r {
+		errStack = append(errStack, obj.Errors...)
+	}
+	return errStack
 }
 
 // WithoutErrors returns objects with no errors
@@ -169,14 +212,14 @@ func (r *Result) WithoutErrors() *Result {
 // Executable returns objects whose first argument is in PATH
 func (r *Result) Executable() *Result {
 	return r.Filter(func(o Object) bool {
-		return o.Command != ""
+		return o.Attr.Command != ""
 	})
 }
 
 // Directories returns the objects that the first argument is a directory
 func (r *Result) Directories() *Result {
 	return r.Filter(func(o Object) bool {
-		return o.IsDir
+		return o.Attr.IsDir
 	})
 }
 

@@ -12,9 +12,5 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	// pp.Println(res)
-	// pp.Println(res.WithoutErrors())
-	pp.Println(res.String())
-	pp.Println(res.Executable())
-	pp.Println(res.Directories())
+	pp.Println(res)
 }
