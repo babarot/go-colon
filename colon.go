@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/mattn/go-shellwords"
@@ -31,11 +32,8 @@ type Object struct {
 	// separated by Separator
 	Index int
 
-	// Args is the result parsed according to the shell's splitting rules
-	Args []string
-
-	// First is the first argument of Args
-	First string
+	// Attr ...
+	Attr Attribute
 
 	// Errors stacks all errors that occurred during parsing
 	Errors []error
@@ -46,6 +44,13 @@ type Object struct {
 
 	// IsDir returns true if the first argument is a directory
 	IsDir bool
+}
+
+type Attribute struct {
+	First     string
+	Other     []string
+	Args      []string
+	Base, Dir string
 }
 
 type Result []Object
@@ -93,10 +98,22 @@ func (p *Parser) Parse(str string) (*Result, error) {
 			err = fmt.Errorf("%s: no such file or directory", first)
 			errStack = append(errStack, err)
 		}
+		attr := Attribute{
+			First: args[0],
+			Other: args[1:],
+			Args:  args,
+			Base:  filepath.Base(args[0]),
+			Dir: func(arg string) string {
+				dir := filepath.Dir(arg)
+				if dir == "." {
+					return ""
+				}
+				return dir
+			}(args[0]),
+		}
 		objs = append(objs, Object{
 			Index:   index + 1,
-			Args:    args,
-			First:   first,
+			Attr:    attr,
 			Errors:  errStack,
 			Command: command,
 			IsDir:   isDir,
@@ -138,7 +155,7 @@ func (r *Result) Filter(fn func(Object) bool) *Result {
 // Get returns one object containing the given string
 func (r *Result) Get(str string) *Result {
 	return r.Filter(func(o Object) bool {
-		return strings.Contains(strings.Join(o.Args, " "), str)
+		return strings.Contains(strings.Join(o.Attr.Args, " "), str)
 	})
 }
 
