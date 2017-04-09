@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/mattn/go-shellwords"
@@ -23,40 +24,41 @@ type Parser struct {
 	Separator string
 }
 
-type Result struct {
-	// Origin is the original string
-	Origin string
-
-	// Object shows parsing result
-	Objects Objects
-}
-
-// Object shows parsing result
-// e.g. "/bin:/usr/bin:..."
-// ......^^^^ Object
+// Object is parsed result
 type Object struct {
 	// Index returns the number of the given character string
 	// separated by Separator
 	Index int
 
-	// Args is the result parsed according to the shell's splitting rules
-	Args []string
-
-	// First is the first argument of Args
-	First string
+	// Attr has detailed information on the object
+	Attr Attribute
 
 	// Errors stacks all errors that occurred during parsing
 	Errors []error
+}
 
-	// Command returns the full path of the command
-	// if its first argument is found in PATH
-	Command string
+// Attribute represents file attribute information
+type Attribute struct {
+	// First means the first argument if there are multiple arguments
+	First string
+
+	// Other means the arguments other than the first argument
+	Other []string
+
+	// Args means the all arguments
+	Args []string
+
+	// Base and Dir mean Basename and Dirname of the file respectively
+	Base, Dir string
 
 	// IsDir returns true if the first argument is a directory
 	IsDir bool
+
+	// Command returns the full-path if the first argument is in $PATH
+	Command string
 }
 
-type Objects []Object
+type Result []Object
 
 // NewParser creates Parser
 func NewParser() *Parser {
@@ -70,7 +72,7 @@ func (p *Parser) Parse(str string) (*Result, error) {
 	if str == "" {
 		return &Result{}, ErrInvalid
 	}
-	var objs Objects
+	var objs Result
 
 	items := strings.Split(str, p.Separator)
 	for index, item := range items {
@@ -101,69 +103,34 @@ func (p *Parser) Parse(str string) (*Result, error) {
 			err = fmt.Errorf("%s: no such file or directory", first)
 			errStack = append(errStack, err)
 		}
-		objs = append(objs, Object{
-			Index:   index + 1,
-			Args:    args,
-			First:   first,
-			Errors:  errStack,
+		attr := Attribute{
+			First: args[0],
+			Other: args[1:],
+			Args:  args,
+			Base:  filepath.Base(args[0]),
+			Dir: func(arg string) string {
+				dir := filepath.Dir(arg)
+				if dir == "." {
+					return ""
+				}
+				return dir
+			}(args[0]),
 			Command: command,
 			IsDir:   isDir,
+		}
+		objs = append(objs, Object{
+			Index:  index + 1,
+			Attr:   attr,
+			Errors: errStack,
 		})
 	}
 
-	return &Result{
-		Origin:  str,
-		Objects: objs,
-	}, nil
+	return &objs, nil
 }
 
 // Parse is public method exported for accessing from other package
 func Parse(str string) (*Result, error) {
 	return NewParser().Parse(str)
-}
-
-// String returns the original string before being parsed
-func (r *Result) String() string {
-	return r.Origin
-}
-
-// Filter filters the parse result by condition
-func (r *Result) Filter(fn func(Object) bool) Objects {
-	ret := make(Objects, 0)
-	for _, obj := range r.Objects {
-		if fn(obj) {
-			ret = append(ret, obj)
-		}
-	}
-	return ret
-}
-
-// Get returns one object containing the given string
-func (r *Result) Get(str string) Objects {
-	return r.Filter(func(o Object) bool {
-		return strings.Contains(strings.Join(o.Args, " "), str)
-	})
-}
-
-// WithoutErrors returns objects with no errors
-func (r *Result) WithoutErrors() Objects {
-	return r.Filter(func(o Object) bool {
-		return len(o.Errors) == 0
-	})
-}
-
-// Executable returns objects whose first argument is in PATH
-func (r *Result) Executable() Objects {
-	return r.Filter(func(o Object) bool {
-		return o.Command != ""
-	})
-}
-
-// Directories returns the objects that the first argument is a directory
-func (r *Result) Directories() Objects {
-	return r.Filter(func(o Object) bool {
-		return o.IsDir
-	})
 }
 
 func isDir(name string) bool {
@@ -179,10 +146,87 @@ func isExist(name string) bool {
 	return err == nil
 }
 
-// One returns the first Objects. If not, returns empty
-func (o Objects) One() Object {
-	if len(o) > 0 {
-		return o[0]
+func uniqueSlice(args Result) Result {
+	rs := make(Result, 0, len(args))
+	encountered := map[int]bool{}
+	for _, arg := range args {
+		if !encountered[arg.Index] {
+			encountered[arg.Index] = true
+			rs = append(rs, arg)
+		}
 	}
-	return Object{}
+	return rs
+}
+
+// Filter filters the parse result by condition
+func (r *Result) Filter(fn func(Object) bool) *Result {
+	ret := make(Result, 0)
+	for _, obj := range *r {
+		if fn(obj) {
+			ret = append(ret, obj)
+		}
+	}
+	return &ret
+}
+
+// Get searches parsed results with given arguments and returns matched objects
+//
+// PATH="/bin:/usr/bin:/usr/local/bin"
+// Get("usr") => "/usr/bin","/usr/local/bin"
+// Get(1) => "/bin"
+func (r *Result) Get(args ...interface{}) *Result {
+	var rs Result
+	for _, arg := range args {
+		switch arg.(type) {
+		case string:
+			rs = append(rs, *r.Filter(func(o Object) bool {
+				return strings.Contains(strings.Join(o.Attr.Args, " "), arg.(string))
+			})...)
+		case int:
+			rs = append(rs, *r.Filter(func(o Object) bool {
+				return o.Index == arg.(int)
+			})...)
+		}
+	}
+	// Remove it if there is the same
+	rs = uniqueSlice(rs)
+	return &rs
+}
+
+// Error extracts only errors from objects
+func (r *Result) Error() []error {
+	var errStack []error
+	for _, obj := range *r {
+		errStack = append(errStack, obj.Errors...)
+	}
+	return errStack
+}
+
+// WithoutErrors returns objects with no errors
+func (r *Result) WithoutErrors() *Result {
+	return r.Filter(func(o Object) bool {
+		return len(o.Errors) == 0
+	})
+}
+
+// Executable returns objects whose first argument is in PATH
+func (r *Result) Executable() *Result {
+	return r.Filter(func(o Object) bool {
+		return o.Attr.Command != ""
+	})
+}
+
+// Directories returns the objects that the first argument is a directory
+func (r *Result) Directories() *Result {
+	return r.Filter(func(o Object) bool {
+		return o.Attr.IsDir
+	})
+}
+
+// One returns the first Object. If not, returns empty
+func (r *Result) One() Object {
+	if len(*r) == 0 {
+		return Object{}
+	}
+	return (*r)[0]
 }
