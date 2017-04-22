@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	// "path/filepath"
 	"strings"
 
 	"github.com/mattn/go-shellwords"
@@ -24,41 +24,21 @@ type Parser struct {
 	Separator string
 }
 
-// Object is parsed result
-type Object struct {
+// Result is parsed result
+type Result struct {
 	// Index returns the number of the given character string
 	// separated by Separator
 	Index int
 
-	// Attr has detailed information on the object
-	Attr Attribute
+	Item    string
+	Args    []string
+	Command string
 
 	// Errors stacks all errors that occurred during parsing
 	Errors []error
 }
 
-// Attribute represents file attribute information
-type Attribute struct {
-	// First means the first argument if there are multiple arguments
-	First string
-
-	// Other means the arguments other than the first argument
-	Other []string
-
-	// Args means the all arguments
-	Args []string
-
-	// Base and Dir mean Basename and Dirname of the file respectively
-	Base, Dir string
-
-	// IsDir returns true if the first argument is a directory
-	IsDir bool
-
-	// Command returns the full-path if the first argument is in $PATH
-	Command string
-}
-
-type Result []Object
+type Results []Result
 
 // NewParser creates Parser
 func NewParser() *Parser {
@@ -68,31 +48,31 @@ func NewParser() *Parser {
 }
 
 // Parser parses colon-separated string like PATH
-func (p *Parser) Parse(str string) (*Result, error) {
+func (p *Parser) Parse(str string) (*Results, error) {
+	var rs Results
 	if str == "" {
-		return &Result{}, ErrInvalid
+		return &rs, ErrInvalid
 	}
-	var objs Result
+
+	var (
+		errStack []error
+		isdir    bool
+		first    string
+		command  string
+	)
 
 	items := strings.Split(str, p.Separator)
 	for index, item := range items {
-		if item == "" {
-			continue
-		}
-		var (
-			errStack []error
-			command  string
-			first    string
-		)
 		args, err := shellwords.Parse(item)
-		if len(args) > 0 {
-			first = args[0]
-		}
 		if err != nil {
 			errStack = append(errStack, err)
 		}
-		isDir := isDir(first)
-		if !isDir {
+		if len(args) == 0 {
+			return &rs, ErrInvalid
+		}
+		first = args[0]
+		isdir = isDir(first)
+		if !isdir {
 			// Discard err in order not to make an error
 			// even if it is not found in your PATH
 			command, _ = exec.LookPath(first)
@@ -103,33 +83,20 @@ func (p *Parser) Parse(str string) (*Result, error) {
 			err = fmt.Errorf("%s: no such file or directory", first)
 			errStack = append(errStack, err)
 		}
-		attr := Attribute{
-			First: args[0],
-			Other: args[1:],
-			Args:  args,
-			Base:  filepath.Base(args[0]),
-			Dir: func(arg string) string {
-				dir := filepath.Dir(arg)
-				if dir == "." {
-					return ""
-				}
-				return dir
-			}(args[0]),
+		rs = append(rs, Result{
+			Index:   index + 1,
+			Item:    item,
+			Args:    args,
 			Command: command,
-			IsDir:   isDir,
-		}
-		objs = append(objs, Object{
-			Index:  index + 1,
-			Attr:   attr,
-			Errors: errStack,
+			Errors:  errStack,
 		})
 	}
 
-	return &objs, nil
+	return &rs, nil
 }
 
 // Parse is public method exported for accessing from other package
-func Parse(str string) (*Result, error) {
+func Parse(str string) (*Results, error) {
 	return NewParser().Parse(str)
 }
 
@@ -146,8 +113,33 @@ func isExist(name string) bool {
 	return err == nil
 }
 
-func uniqueSlice(args Result) Result {
-	rs := make(Result, 0, len(args))
+// Filter filters the parse result by condition
+func (rs *Results) Filter(fn func(Result) bool) *Results {
+	results := make(Results, 0)
+	for _, result := range *rs {
+		if fn(result) {
+			results = append(results, result)
+		}
+	}
+	return &results
+}
+
+// Executable returns objects whose first argument is in PATH
+func (rs *Results) Executable() *Results {
+	return rs.Filter(func(r Result) bool {
+		return r.Command != ""
+	})
+}
+
+func (rs *Results) First() (Result, error) {
+	if len(*rs) == 0 {
+		return Result{}, errors.New("no result")
+	}
+	return (*rs)[0], nil
+}
+
+func uniqueSlice(args Results) Results {
+	rs := make(Results, 0, len(args))
 	encountered := map[int]bool{}
 	for _, arg := range args {
 		if !encountered[arg.Index] {
@@ -158,75 +150,24 @@ func uniqueSlice(args Result) Result {
 	return rs
 }
 
-// Filter filters the parse result by condition
-func (r *Result) Filter(fn func(Object) bool) *Result {
-	ret := make(Result, 0)
-	for _, obj := range *r {
-		if fn(obj) {
-			ret = append(ret, obj)
-		}
-	}
-	return &ret
-}
-
-// Get searches parsed results with given arguments and returns matched objects
-//
-// PATH="/bin:/usr/bin:/usr/local/bin"
-// Get("usr") => "/usr/bin","/usr/local/bin"
-// Get(1) => "/bin"
-func (r *Result) Get(args ...interface{}) *Result {
-	var rs Result
+func (rs *Results) Get(args ...interface{}) *Results {
+	var results Results
 	for _, arg := range args {
 		switch arg.(type) {
 		case string:
-			rs = append(rs, *r.Filter(func(o Object) bool {
-				return strings.Contains(strings.Join(o.Attr.Args, " "), arg.(string))
+			results = append(results, *rs.Filter(func(r Result) bool {
+				if len(r.Args) == 0 {
+					return false
+				}
+				return r.Args[0] == arg.(string)
 			})...)
 		case int:
-			rs = append(rs, *r.Filter(func(o Object) bool {
-				return o.Index == arg.(int)
+			results = append(results, *rs.Filter(func(r Result) bool {
+				return r.Index == arg.(int)
 			})...)
 		}
 	}
 	// Remove it if there is the same
-	rs = uniqueSlice(rs)
-	return &rs
-}
-
-// Error extracts only errors from objects
-func (r *Result) Error() []error {
-	var errStack []error
-	for _, obj := range *r {
-		errStack = append(errStack, obj.Errors...)
-	}
-	return errStack
-}
-
-// WithoutErrors returns objects with no errors
-func (r *Result) WithoutErrors() *Result {
-	return r.Filter(func(o Object) bool {
-		return len(o.Errors) == 0
-	})
-}
-
-// Executable returns objects whose first argument is in PATH
-func (r *Result) Executable() *Result {
-	return r.Filter(func(o Object) bool {
-		return o.Attr.Command != ""
-	})
-}
-
-// Directories returns the objects that the first argument is a directory
-func (r *Result) Directories() *Result {
-	return r.Filter(func(o Object) bool {
-		return o.Attr.IsDir
-	})
-}
-
-// One returns the first Object. If not, returns empty
-func (r *Result) One() Object {
-	if len(*r) == 0 {
-		return Object{}
-	}
-	return (*r)[0]
+	results = uniqueSlice(results)
+	return &results
 }
