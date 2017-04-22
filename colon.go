@@ -101,6 +101,9 @@ func Parse(str string) (*Results, error) {
 }
 
 func isDir(name string) bool {
+	if !strings.HasPrefix(name, "/") {
+		return false
+	}
 	fi, err := os.Stat(name)
 	if err != nil {
 		return false
